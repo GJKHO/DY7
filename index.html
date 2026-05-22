@@ -133,7 +133,144 @@
             BUILD_VERSION: '1',
         }
     </script>
-    <script src="./games/sdk/v2"></script>
+    <!-- Yandex SDK 仅在 Yandex 平台运行时加载，本地/TG 环境跳过 -->
+    <!-- <script src="./games/sdk/v2"></script> -->
+
+    <!-- 独立运行 Mock FBInstant，绕过 Yandex/Facebook 平台依赖 -->
+    <script>
+        (function () {
+            // 仅在非平台环境下注入 Mock（避免覆盖真实 SDK）
+            if (typeof window.FBInstant === 'undefined' && typeof window.YaGames === 'undefined') {
+                var _playerId = (function () {
+                    try {
+                        var id = localStorage.getItem('__mock_player_id');
+                        if (!id) { id = 'guest_' + Math.random().toString(36).substr(2, 9); localStorage.setItem('__mock_player_id', id); }
+                        return id;
+                    } catch (e) { return 'guest_local'; }
+                })();
+
+                var _mockPlayer = {
+                    getID: function () { return _playerId; },
+                    getName: function () { return 'Guest'; },
+                    getPhoto: function () { return ''; },
+                    getDataAsync: function (keys) {
+                        try {
+                            var data = JSON.parse(localStorage.getItem('__game_data') || '{}');
+                            if (keys && Array.isArray(keys)) {
+                                var res = {}; keys.forEach(function (k) { res[k] = data[k]; }); return Promise.resolve(res);
+                            }
+                            return Promise.resolve(data);
+                        } catch (e) { return Promise.resolve({}); }
+                    },
+                    setDataAsync: function (data) {
+                        try {
+                            var ex = JSON.parse(localStorage.getItem('__game_data') || '{}');
+                            localStorage.setItem('__game_data', JSON.stringify(Object.assign(ex, data)));
+                        } catch (e) { }
+                        return Promise.resolve();
+                    },
+                    flushDataAsync: function () { return Promise.resolve(); },
+                    getStatsAsync: function (keys) {
+                        try {
+                            var stats = JSON.parse(localStorage.getItem('__game_stats') || '{}');
+                            if (keys && Array.isArray(keys)) {
+                                var res = {}; keys.forEach(function (k) { res[k] = stats[k]; }); return Promise.resolve(res);
+                            }
+                            return Promise.resolve(stats);
+                        } catch (e) { return Promise.resolve({}); }
+                    },
+                    setStatsAsync: function (data) {
+                        try {
+                            var ex = JSON.parse(localStorage.getItem('__game_stats') || '{}');
+                            localStorage.setItem('__game_stats', JSON.stringify(Object.assign(ex, data)));
+                        } catch (e) { }
+                        return Promise.resolve();
+                    },
+                    incrementStatsAsync: function (data) {
+                        try {
+                            var ex = JSON.parse(localStorage.getItem('__game_stats') || '{}');
+                            Object.keys(data).forEach(function (k) { ex[k] = (ex[k] || 0) + data[k]; });
+                            localStorage.setItem('__game_stats', JSON.stringify(ex));
+                            return Promise.resolve(ex);
+                        } catch (e) { return Promise.resolve(data); }
+                    },
+                    getSignedPlayerInfoAsync: function () {
+                        return Promise.resolve({ getPlayerID: function () { return _playerId; }, getSignature: function () { return _playerId; } });
+                    },
+                    canSubscribeBotAsync: function () { return Promise.resolve(false); },
+                    subscribeBotAsync: function () { return Promise.reject(new Error('Unsupported')); },
+                    getConnectedPlayersAsync: function () { return Promise.resolve([]); },
+                };
+
+                var _mockAd = {
+                    loadAsync: function () { return Promise.resolve(); },
+                    showAsync: function () { return Promise.resolve(); },
+                };
+
+                window.FBInstant = {
+                    initializeAsync: function () { return Promise.resolve(); },
+                    startGameAsync: function () {
+                        var el = document.getElementById('lds-content');
+                        if (el) el.remove();
+                        return Promise.resolve();
+                    },
+                    setLoadingProgress: function (p) {
+                        var el = document.getElementById('lds-percent');
+                        if (el) el.textContent = Math.min(100, Math.round(p));
+                    },
+                    getLocale: function () { return 'zh_CN'; },
+                    getPlatform: function () { return 'STANDALONE'; },
+                    getSDKVersion: function () { return '1.0'; },
+                    getSupportedAPIs: function () { return []; },
+                    getEntryPointAsync: function () { return Promise.resolve('direct'); },
+                    getEntryPointData: function () { return {}; },
+                    setSessionData: function () { },
+                    logEvent: function () { return null; },
+                    onPause: function () { },
+                    quit: function () { },
+                    performHapticFeedbackAsync: function () { return Promise.resolve(); },
+                    canCreateShortcutAsync: function () { return Promise.reject(new Error('Unsupported')); },
+                    createShortcutAsync: function () { return Promise.reject(new Error('Unsupported')); },
+                    shareAsync: function () { return Promise.reject(new Error('Unsupported')); },
+                    updateAsync: function () { return Promise.reject(new Error('Unsupported')); },
+                    switchGameAsync: function () { return Promise.reject(new Error('Unsupported')); },
+                    matchPlayerAsync: function () { return Promise.reject(new Error('Unsupported')); },
+                    checkCanPlayerMatchAsync: function () { return Promise.reject(false); },
+                    postSessionScoreAsync: function () { return Promise.resolve(); },
+                    showGameRating: function () { return Promise.resolve(); },
+                    getTournamentAsync: function () { return Promise.reject(new Error('Unsupported')); },
+                    inviteAsync: function () { return Promise.reject(new Error('Unsupported')); },
+                    player: _mockPlayer,
+                    context: {
+                        getID: function () { return null; },
+                        getType: function () { return 'SOLO'; },
+                        isSizeBetween: function () { return null; },
+                        switchAsync: function () { return Promise.reject(new Error('Unsupported')); },
+                        chooseAsync: function () { return Promise.reject(new Error('Unsupported')); },
+                        createAsync: function () { return Promise.reject(new Error('Unsupported')); },
+                        getPlayersAsync: function () { return Promise.reject(new Error('Unsupported')); },
+                    },
+                    getInterstitialAdAsync: function () { return Promise.resolve(_mockAd); },
+                    getRewardedVideoAsync: function () { return Promise.resolve(_mockAd); },
+                    loadBannerAdAsync: function () { return Promise.resolve(); },
+                    hideBannerAdAsync: function () { return Promise.resolve(); },
+                    setBannerAdSize: function () { },
+                    getLeaderboardAsync: function (name) {
+                        return Promise.resolve({
+                            getName: function () { return name; },
+                            getContextID: function () { return null; },
+                            getEntryCountAsync: function () { return Promise.resolve(0); },
+                            setScoreAsync: function () { return Promise.resolve(); },
+                            getPlayerEntryAsync: function () { return Promise.resolve(null); },
+                            getEntriesAsync: function () { return Promise.resolve([]); },
+                            getConnectedPlayerEntriesAsync: function () { return Promise.resolve([]); },
+                        });
+                    },
+                };
+                console.log('[Mock FBInstant] 独立运行模式已激活，跳过平台 SDK 初始化');
+            }
+        })();
+    </script>
 </head>
 
 <body>
