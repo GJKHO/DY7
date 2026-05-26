@@ -385,7 +385,24 @@
 
     <script>
     (function () {
-        // Telegram SDK 初始化
+        // ── 调试浮层（点击可关闭，排查完毕后删除此函数及调用） ──
+        function showDebugOverlay(lines) {
+            var old = document.getElementById('_dbg_overlay');
+            if (old) old.remove();
+            var box = document.createElement('div');
+            box.id = '_dbg_overlay';
+            box.style.cssText = [
+                'position:fixed;top:0;left:0;right:0;z-index:99999',
+                'background:rgba(0,0,0,.88);color:#0f0',
+                'font:12px/1.6 monospace;padding:8px;white-space:pre',
+                'word-break:break-all'
+            ].join(';');
+            box.textContent = lines.join('\n');
+            box.onclick = function () { box.remove(); };
+            document.body.appendChild(box);
+        }
+
+        // ── Telegram SDK 初始化 ──
         window.Telegram && window.Telegram.WebApp && (
             window.Telegram.WebApp.ready(),
             window.Telegram.WebApp.expand()
@@ -394,7 +411,7 @@
         var AdController = null;
         var IntAdController = null;
 
-        // 从 ID.txt 读取广告 Block ID，格式：KEY=VALUE，每行一条
+        // ── 从 ID.txt 读取广告 Block ID ──
         function loadConfig(cb) {
             fetch('ID.txt?_=' + Date.now())
                 .then(function (r) { return r.text(); })
@@ -404,19 +421,67 @@
                         var parts = line.trim().split('=');
                         if (parts.length === 2) cfg[parts[0].trim()] = parts[1].trim();
                     });
+                    console.log('[Adsgram] ID.txt loaded:', JSON.stringify(cfg));
                     cb(cfg);
                 })
-                .catch(function () { cb({}); });
+                .catch(function (e) {
+                    console.error('[Adsgram] ID.txt fetch failed:', e);
+                    cb({});
+                });
         }
 
         function initAds(cfg) {
-            if (!window.Adsgram) return;
+            var wa       = window.Telegram && window.Telegram.WebApp;
+            var initData = wa ? wa.initData : null;
             var rewardId = cfg['REWARD_BLOCK_ID'] || '';
             var intId    = cfg['INT_BLOCK_ID']    || '';
-            try { if (rewardId) AdController    = window.Adsgram.init({ blockId: rewardId }); } catch(e) {}
-            try { if (intId)    IntAdController = window.Adsgram.init({ blockId: intId });    } catch(e) {}
 
-            document.getElementById('tg-reward-btn').style.display = 'block';
+            // ── 打印调试信息 ──
+            var dbgLines = [
+                '=== Adsgram Debug (点击关闭) ===',
+                'window.Telegram : ' + (window.Telegram  ? 'YES' : 'NO'),
+                'WebApp           : ' + (wa               ? 'YES' : 'NO'),
+                'platform         : ' + (wa ? wa.platform : 'N/A'),
+                'initData empty   : ' + (initData ? 'NO (len=' + initData.length + ')' : 'YES (空!)'),
+                'window.Adsgram   : ' + (window.Adsgram  ? 'YES' : 'NO'),
+                'REWARD_BLOCK_ID  : ' + (rewardId || '(未读到)'),
+                'INT_BLOCK_ID     : ' + (intId    || '(未读到)'),
+            ];
+
+            if (!window.Adsgram) {
+                dbgLines.push('❌ Adsgram SDK 未加载，广告无法初始化');
+                showDebugOverlay(dbgLines);
+                return;
+            }
+
+            try {
+                if (rewardId) {
+                    AdController = window.Adsgram.init({ blockId: rewardId });
+                    dbgLines.push('AdController     : OK (' + rewardId + ')');
+                } else {
+                    dbgLines.push('AdController     : ❌ rewardId 为空');
+                }
+            } catch(e) {
+                dbgLines.push('AdController     : ❌ init 异常 ' + e);
+            }
+
+            try {
+                if (intId) {
+                    IntAdController = window.Adsgram.init({ blockId: intId });
+                    dbgLines.push('IntAdController  : OK (' + intId + ')');
+                } else {
+                    dbgLines.push('IntAdController  : ❌ intId 为空');
+                }
+            } catch(e) {
+                dbgLines.push('IntAdController  : ❌ init 异常 ' + e);
+            }
+
+            showDebugOverlay(dbgLines);
+
+            // ── 仅在 AdController 成功时才显示按钮 ──
+            if (AdController) {
+                document.getElementById('tg-reward-btn').style.display = 'block';
+            }
             startIntAdTimer();
         }
 
@@ -424,28 +489,34 @@
             if (window.Adsgram) {
                 initAds(cfg);
             } else {
+                var tries = 0;
                 var sdkCheck = setInterval(function () {
-                    if (window.Adsgram) { clearInterval(sdkCheck); initAds(cfg); }
+                    tries++;
+                    if (window.Adsgram) {
+                        clearInterval(sdkCheck);
+                        initAds(cfg);
+                    } else if (tries > 30) {          // 9 秒超时
+                        clearInterval(sdkCheck);
+                        initAds(cfg);                  // 让 initAds 打印"未加载"信息
+                    }
                 }, 300);
             }
         }
 
-        // 先加载配置，再初始化广告
-        loadConfig(function (cfg) {
-            waitAndInit(cfg);
-        });
+        loadConfig(function (cfg) { waitAndInit(cfg); });
 
-        // 激励广告：看完后 +200 分
+        // ── 激励广告：看完后 +200 分 ──
         window.tgShowRewardAd = function () {
-            if (!AdController) return;
+            if (!AdController) {
+                console.warn('[Adsgram] AdController 未初始化，无法播放广告');
+                return;
+            }
             var btn = document.getElementById('tg-reward-btn');
             btn.disabled = true;
             AdController.show().then(function () {
-                // 通知游戏加分（游戏脚本可覆盖此函数实现真实加分）
                 if (typeof window.onAdsgramReward === 'function') {
                     window.onAdsgramReward(200);
                 }
-                // 浮动提示
                 var toast = document.getElementById('tg-score-toast');
                 toast.style.display = 'block';
                 toast.style.animation = 'none';
@@ -453,7 +524,6 @@
                     toast.style.animation = 'floatUp 1.2s ease forwards';
                     setTimeout(function () { toast.style.display = 'none'; }, 1200);
                 }, 20);
-                // 60 秒冷却
                 var cd = 60;
                 btn.textContent = '⏳ ' + cd + 's';
                 var cdTimer = setInterval(function () {
@@ -466,12 +536,13 @@
                         btn.textContent = '⏳ ' + cd + 's';
                     }
                 }, 1000);
-            }).catch(function () {
+            }).catch(function (err) {
+                console.error('[Adsgram] show() 失败:', err);
                 btn.disabled = false;
             });
         };
 
-        // 插屏广告：每 30 秒自动弹出
+        // ── 插屏广告：每 30 秒自动弹出 ──
         var intAdInterval = null;
         function startIntAdTimer() {
             intAdInterval = setInterval(function () {
